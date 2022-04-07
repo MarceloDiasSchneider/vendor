@@ -624,6 +624,8 @@ class PendingRequest
             $results[$key] = $item instanceof static ? $item->getPromise()->wait() : $item->wait();
         }
 
+        ksort($results);
+
         return $results;
     }
 
@@ -707,10 +709,7 @@ class PendingRequest
     {
         return $this->promise = $this->sendRequest($method, $url, $options)
             ->then(function (MessageInterface $message) {
-                return tap(new Response($message), function ($response) {
-                    $this->populateResponse($response);
-                    $this->dispatchResponseReceivedEvent($response);
-                });
+                return $this->populateResponse(new Response($message));
             })
             ->otherwise(function (TransferException $e) {
                 return $e instanceof RequestException ? $this->populateResponse(new Response($e->getResponse())) : $e;
