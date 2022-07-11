@@ -4,10 +4,18 @@ namespace Illuminate\Foundation\Testing\Concerns;
 
 use Closure;
 use Illuminate\Foundation\Mix;
+use Illuminate\Foundation\Vite;
 use Mockery;
 
 trait InteractsWithContainer
 {
+    /**
+     * The original Vite handler.
+     *
+     * @var \Illuminate\Foundation\Vite|null
+     */
+    protected $originalVite;
+
     /**
      * The original Laravel Mix handler.
      *
@@ -50,7 +58,7 @@ trait InteractsWithContainer
      */
     protected function mock($abstract, Closure $mock = null)
     {
-        return $this->singletonInstance($abstract, Mockery::mock(...array_filter(func_get_args())));
+        return $this->instance($abstract, Mockery::mock(...array_filter(func_get_args())));
     }
 
     /**
@@ -62,7 +70,7 @@ trait InteractsWithContainer
      */
     protected function partialMock($abstract, Closure $mock = null)
     {
-        return $this->singletonInstance($abstract, Mockery::mock(...array_filter(func_get_args()))->makePartial());
+        return $this->instance($abstract, Mockery::mock(...array_filter(func_get_args()))->makePartial());
     }
 
     /**
@@ -74,23 +82,52 @@ trait InteractsWithContainer
      */
     protected function spy($abstract, Closure $mock = null)
     {
-        return $this->singletonInstance($abstract, Mockery::spy(...array_filter(func_get_args())));
+        return $this->instance($abstract, Mockery::spy(...array_filter(func_get_args())));
     }
 
     /**
-     * Register an instance of an object as a singleton in the container.
+     * Instruct the container to forget a previously mocked / spied instance of an object.
      *
      * @param  string  $abstract
-     * @param  \Mockery\MockInterface  $instance
-     * @return \Mockery\MockInterface
+     * @return $this
      */
-    protected function singletonInstance($abstract, $instance)
+    protected function forgetMock($abstract)
     {
-        $this->app->singleton($abstract, function () use ($instance) {
-            return $instance;
+        $this->app->forgetInstance($abstract);
+
+        return $this;
+    }
+
+    /**
+     * Register an empty handler for Vite in the container.
+     *
+     * @return $this
+     */
+    protected function withoutVite()
+    {
+        if ($this->originalVite == null) {
+            $this->originalVite = app(Vite::class);
+        }
+
+        $this->swap(Vite::class, function () {
+            return '';
         });
 
-        return $instance;
+        return $this;
+    }
+
+    /**
+     * Restore Vite in the container.
+     *
+     * @return $this
+     */
+    protected function withVite()
+    {
+        if ($this->originalVite) {
+            $this->app->instance(Vite::class, $this->originalVite);
+        }
+
+        return $this;
     }
 
     /**
@@ -112,7 +149,7 @@ trait InteractsWithContainer
     }
 
     /**
-     * Register an empty handler for Laravel Mix in the container.
+     * Restore Laravel Mix in the container.
      *
      * @return $this
      */

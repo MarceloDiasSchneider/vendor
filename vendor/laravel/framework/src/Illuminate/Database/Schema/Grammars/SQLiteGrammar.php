@@ -16,7 +16,7 @@ class SQLiteGrammar extends Grammar
      *
      * @var string[]
      */
-    protected $modifiers = ['Primary', 'VirtualAs', 'StoredAs', 'Nullable', 'Default', 'Increment'];
+    protected $modifiers = ['VirtualAs', 'StoredAs', 'Nullable', 'Default', 'Increment'];
 
     /**
      * The columns available as serials.
@@ -55,11 +55,12 @@ class SQLiteGrammar extends Grammar
      */
     public function compileCreate(Blueprint $blueprint, Fluent $command)
     {
-        return sprintf('%s table %s (%s%s)',
+        return sprintf('%s table %s (%s%s%s)',
             $blueprint->temporary ? 'create temporary' : 'create',
             $this->wrapTable($blueprint),
             implode(', ', $this->getColumns($blueprint)),
-            (string) $this->addForeignKeys($blueprint)
+            (string) $this->addForeignKeys($blueprint),
+            (string) $this->addPrimaryKeys($blueprint)
         );
     }
 
@@ -243,6 +244,26 @@ class SQLiteGrammar extends Grammar
     public function compileDropAllViews()
     {
         return "delete from sqlite_master where type in ('view')";
+    }
+
+    /**
+     * Compile the SQL needed to retrieve all table names.
+     *
+     * @return string
+     */
+    public function compileGetAllTables()
+    {
+        return 'select type, name from sqlite_master where type = \'table\' and name not like \'sqlite_%\'';
+    }
+
+    /**
+     * Compile the SQL needed to retrieve all view names.
+     *
+     * @return string
+     */
+    public function compileGetAllViews()
+    {
+        return 'select type, name from sqlite_master where type = \'view\'';
     }
 
     /**
@@ -637,6 +658,7 @@ class SQLiteGrammar extends Grammar
      * Create the column definition for a date-time (with time zone) type.
      *
      * Note: "SQLite does not have a storage class set aside for storing dates and/or times."
+     *
      * @link https://www.sqlite.org/datatype3.html
      *
      * @param  \Illuminate\Support\Fluent  $column
@@ -848,16 +870,81 @@ class SQLiteGrammar extends Grammar
     }
 
     /**
-     * Get the SQL for a primary column modifier.
+     * Get the SQL for a generated virtual column modifier.
      *
      * @param  \Illuminate\Database\Schema\Blueprint  $blueprint
      * @param  \Illuminate\Support\Fluent  $column
      * @return string|null
      */
-    public function modifyPrimary(Blueprint $blueprint, Fluent $column)
+    protected function modifyVirtualAs(Blueprint $blueprint, Fluent $column)
     {
-        if (! $column->autoIncrement && ! is_null($column->primary)) {
-            return ' primary key';
+        if (! is_null($virtualAs = $column->virtualAsJson)) {
+            if ($this->isJsonSelector($virtualAs)) {
+                $virtualAs = $this->wrapJsonSelector($virtualAs);
+            }
+
+            return " as ({$virtualAs})";
+        }
+
+        if (! is_null($virtualAs = $column->virtualAs)) {
+            return " as ({$virtualAs})";
+        }
+    }
+
+    /**
+     * Get the SQL for a generated stored column modifier.
+     *
+     * @param  \Illuminate\Database\Schema\Blueprint  $blueprint
+     * @param  \Illuminate\Support\Fluent  $column
+     * @return string|null
+     */
+    protected function modifyStoredAs(Blueprint $blueprint, Fluent $column)
+    {
+        if (! is_null($storedAs = $column->storedAsJson)) {
+            if ($this->isJsonSelector($storedAs)) {
+                $storedAs = $this->wrapJsonSelector($storedAs);
+            }
+
+            return " as ({$storedAs}) stored";
+        }
+
+        if (! is_null($storedAs = $column->storedAs)) {
+            return " as ({$column->storedAs}) stored";
+        }
+    }
+
+    /**
+     * Get the SQL for a nullable column modifier.
+     *
+     * @param  \Illuminate\Database\Schema\Blueprint  $blueprint
+     * @param  \Illuminate\Support\Fluent  $column
+     * @return string|null
+     */
+    protected function modifyNullable(Blueprint $blueprint, Fluent $column)
+    {
+        if (is_null($column->virtualAs) &&
+            is_null($column->virtualAsJson) &&
+            is_null($column->storedAs) &&
+            is_null($column->storedAsJson)) {
+            return $column->nullable ? '' : ' not null';
+        }
+
+        if ($column->nullable === false) {
+            return ' not null';
+        }
+    }
+
+    /**
+     * Get the SQL for a default column modifier.
+     *
+     * @param  \Illuminate\Database\Schema\Blueprint  $blueprint
+     * @param  \Illuminate\Support\Fluent  $column
+     * @return string|null
+     */
+    protected function modifyDefault(Blueprint $blueprint, Fluent $column)
+    {
+        if (! is_null($column->default) && is_null($column->virtualAs) && is_null($column->virtualAsJson) && is_null($column->storedAs)) {
+            return ' default '.$this->getDefaultValue($column->default);
         }
     }
 
@@ -876,62 +963,15 @@ class SQLiteGrammar extends Grammar
     }
 
     /**
-     * Get the SQL for a nullable column modifier.
+     * Wrap the given JSON selector.
      *
-     * @param  \Illuminate\Database\Schema\Blueprint  $blueprint
-     * @param  \Illuminate\Support\Fluent  $column
-     * @return string|null
+     * @param  string  $value
+     * @return string
      */
-    protected function modifyNullable(Blueprint $blueprint, Fluent $column)
+    protected function wrapJsonSelector($value)
     {
-        if (is_null($column->virtualAs) && is_null($column->storedAs)) {
-            return $column->nullable ? '' : ' not null';
-        }
+        [$field, $path] = $this->wrapJsonFieldAndPath($value);
 
-        if ($column->nullable === false) {
-            return ' not null';
-        }
-    }
-
-    /**
-     * Get the SQL for a default column modifier.
-     *
-     * @param  \Illuminate\Database\Schema\Blueprint  $blueprint
-     * @param  \Illuminate\Support\Fluent  $column
-     * @return string|null
-     */
-    protected function modifyDefault(Blueprint $blueprint, Fluent $column)
-    {
-        if (! is_null($column->default) && is_null($column->virtualAs) && is_null($column->storedAs)) {
-            return ' default '.$this->getDefaultValue($column->default);
-        }
-    }
-
-    /**
-     * Get the SQL for a generated virtual column modifier.
-     *
-     * @param  \Illuminate\Database\Schema\Blueprint  $blueprint
-     * @param  \Illuminate\Support\Fluent  $column
-     * @return string|null
-     */
-    protected function modifyVirtualAs(Blueprint $blueprint, Fluent $column)
-    {
-        if (! is_null($column->virtualAs)) {
-            return " as ({$column->virtualAs})";
-        }
-    }
-
-    /**
-     * Get the SQL for a generated stored column modifier.
-     *
-     * @param  \Illuminate\Database\Schema\Blueprint  $blueprint
-     * @param  \Illuminate\Support\Fluent  $column
-     * @return string|null
-     */
-    protected function modifyStoredAs(Blueprint $blueprint, Fluent $column)
-    {
-        if (! is_null($column->storedAs)) {
-            return " as ({$column->storedAs}) stored";
-        }
+        return 'json_extract('.$field.$path.')';
     }
 }

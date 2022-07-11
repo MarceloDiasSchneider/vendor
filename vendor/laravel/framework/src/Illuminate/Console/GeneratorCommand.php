@@ -2,6 +2,7 @@
 
 namespace Illuminate\Console;
 
+use Illuminate\Console\Concerns\CreatesMatchingTest;
 use Illuminate\Filesystem\Filesystem;
 use Illuminate\Support\Str;
 use Symfony\Component\Console\Input\InputArgument;
@@ -55,6 +56,7 @@ abstract class GeneratorCommand extends Command
         'endif',
         'endswitch',
         'endwhile',
+        'enum',
         'eval',
         'exit',
         'extends',
@@ -75,6 +77,7 @@ abstract class GeneratorCommand extends Command
         'interface',
         'isset',
         'list',
+        'match',
         'namespace',
         'new',
         'or',
@@ -82,6 +85,7 @@ abstract class GeneratorCommand extends Command
         'private',
         'protected',
         'public',
+        'readonly',
         'require',
         'require_once',
         'return',
@@ -96,6 +100,14 @@ abstract class GeneratorCommand extends Command
         'while',
         'xor',
         'yield',
+        '__CLASS__',
+        '__DIR__',
+        '__FILE__',
+        '__FUNCTION__',
+        '__LINE__',
+        '__METHOD__',
+        '__NAMESPACE__',
+        '__TRAIT__',
     ];
 
     /**
@@ -107,6 +119,10 @@ abstract class GeneratorCommand extends Command
     public function __construct(Filesystem $files)
     {
         parent::__construct();
+
+        if (in_array(CreatesMatchingTest::class, class_uses_recursive($this))) {
+            $this->addTestOptions();
+        }
 
         $this->files = $files;
     }
@@ -159,6 +175,10 @@ abstract class GeneratorCommand extends Command
         $this->files->put($path, $this->sortImports($this->buildClass($name)));
 
         $this->info($this->type.' created successfully.');
+
+        if (in_array(CreatesMatchingTest::class, class_uses_recursive($this))) {
+            $this->handleTestCreation($path);
+        }
     }
 
     /**
